@@ -51,7 +51,8 @@ type network struct {
 
 func newNetwork(
 	name string, subnetManager subnet.Manager, extIface *backend.ExternalInterface,
-	port int, tunNetwork ip.IP4Net, l *subnet.Lease) (*network, error) {
+	port int, tunNetwork ip.IP4Net, l *subnet.Lease,
+	forwardingDB fdb.UDPForwardingDB, localPolicy policy.LocalPolicy) (*network, error) {
 
 	n := &network{
 		SimpleNetwork: backend.SimpleNetwork{
@@ -62,8 +63,8 @@ func newNetwork(
 		port:          port,
 		subnetManager: subnetManager,
 		tunNet:        tunNetwork,
-		forwardingDB:  fdb.NewUDPForwardingDB(),
-		localPolicy:   policy.NewFixedPolicy([]byte("0123456789ABCDEF")),
+		forwardingDB:  forwardingDB,
+		localPolicy:   localPolicy,
 	}
 
 	if err := n.initTun(); err != nil {
@@ -76,7 +77,7 @@ func newNetwork(
 		return nil, fmt.Errorf("failed to start listening on UDP socket: %v", err)
 	}
 
-	log.Info("created new udpgo network")
+	log.Infof("created new udpgo network %q", name)
 
 	return n, nil
 }

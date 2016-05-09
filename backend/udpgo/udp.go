@@ -21,7 +21,9 @@ import (
 	"github.com/coreos/flannel/Godeps/_workspace/src/golang.org/x/net/context"
 
 	"github.com/coreos/flannel/backend"
+	"github.com/coreos/flannel/pkg/fdb"
 	"github.com/coreos/flannel/pkg/ip"
+	"github.com/coreos/flannel/pkg/policy"
 	"github.com/coreos/flannel/subnet"
 )
 
@@ -83,7 +85,11 @@ func (be *UdpgoBackend) RegisterNetwork(ctx context.Context, netname string, con
 		PrefixLen: config.Network.PrefixLen,
 	}
 
-	return newNetwork(netname, be.subnetManager, be.extIface, cfg.Port, tunNet, lease)
+	forwardingDB := fdb.NewUDPForwardingDB()
+	localPolicy := policy.NewFixedPolicy([]byte("0123456789ABCDEF"))
+
+	return newNetwork(netname, be.subnetManager, be.extIface, cfg.Port, tunNet,
+		lease, forwardingDB, localPolicy)
 }
 
 func (_ *UdpgoBackend) Run(ctx context.Context) {
