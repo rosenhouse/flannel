@@ -38,6 +38,7 @@ import (
 	_ "github.com/coreos/flannel/backend/gce"
 	_ "github.com/coreos/flannel/backend/hostgw"
 	_ "github.com/coreos/flannel/backend/udp"
+	_ "github.com/coreos/flannel/backend/udpgo"
 	_ "github.com/coreos/flannel/backend/vxlan"
 )
 
