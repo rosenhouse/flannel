@@ -29,13 +29,12 @@ import (
 	"github.com/coreos/flannel/backend"
 	"github.com/coreos/flannel/pkg/fdb"
 	"github.com/coreos/flannel/pkg/ip"
+	"github.com/coreos/flannel/pkg/policy"
 	"github.com/coreos/flannel/subnet"
 )
 
 const (
-	tagLen        = 16
-	encapLen      = 20 + 8 // 20 bytes IP hdr + 8 bytes UDP hdr
-	encapOverhead = encapLen + tagLen
+	encapHeaderLen = 20 + 8 // 20 bytes IP hdr + 8 bytes UDP hdr, does not include tag
 )
 
 type network struct {
@@ -47,6 +46,7 @@ type network struct {
 	tunNet        ip.IP4Net
 	subnetManager subnet.Manager
 	forwardingDB  fdb.UDPForwardingDB
+	localPolicy   policy.LocalPolicy
 }
 
 func newNetwork(
@@ -63,6 +63,7 @@ func newNetwork(
 		subnetManager: subnetManager,
 		tunNet:        tunNetwork,
 		forwardingDB:  fdb.NewUDPForwardingDB(),
+		localPolicy:   policy.NewFixedPolicy([]byte("0123456789ABCDEF")),
 	}
 
 	if err := n.initTun(); err != nil {
@@ -128,8 +129,8 @@ func (n *network) Run(ctx context.Context) {
 }
 
 func (n *network) tunToUDP(ctx context.Context) {
+	tagLen := n.localPolicy.TagLength()
 	tunBuffer := make([]byte, tagLen+n.MTU())
-	copy(tunBuffer[:tagLen], []byte("0123456789ABCDEF"))
 	for {
 		select {
 		case <-ctx.Done():
@@ -144,12 +145,23 @@ func (n *network) tunToUDP(ctx context.Context) {
 				log.Info("tun empty read")
 				continue
 			}
-			toSend := tunBuffer[:(tagLen + nBytesRead)]
+
+			toSend := tunBuffer[:(tagLen + nBytesRead)] // trim outgoing packet
+
+			// apply correct tag
+			localSourceIP := waterutil.IPv4Source(toSend)
+			sourceTag, err := n.localPolicy.GetSourceTag(localSourceIP)
+			if err != nil {
+				log.Errorf("get source tag: %s", err)
+			}
+			copy(toSend[:tagLen], sourceTag)
+
 			dest, err := n.findDest(toSend[tagLen:])
 			if err != nil {
 				log.Errorf("find dest: %s", err)
 				continue
 			}
+
 			if _, err := n.udpConn.WriteToUDP(toSend, dest); err != nil {
 				log.Errorf("send udp: %s", err)
 				continue
@@ -159,6 +171,7 @@ func (n *network) tunToUDP(ctx context.Context) {
 }
 
 func (n *network) udpToTun(ctx context.Context) {
+	tagLen := n.localPolicy.TagLength()
 	udpPayload := make([]byte, tagLen+n.MTU())
 	for {
 		select {
@@ -174,9 +187,17 @@ func (n *network) udpToTun(ctx context.Context) {
 				log.Info("udp empty read")
 				continue
 			}
-			if udpPayload[15] != byte('F') {
-				log.Errorf("bad tag: %x : %s", udpPayload[:tagLen], string(udpPayload[:tagLen]))
+
+			localDestIP := waterutil.IPv4Destination(udpPayload[tagLen:])
+			isAllowed, err := n.localPolicy.IsAllowed(udpPayload[:tagLen], localDestIP)
+			if err != nil {
+				log.Errorf("policy check: %s", err)
 			}
+			if !isAllowed {
+				log.Info("dropping disallowed packet")
+				continue
+			}
+
 			// TODO: apply ingress policy here
 			if _, err := n.tunIO.Write(udpPayload[tagLen:]); err != nil {
 				log.Errorf("write to tun: %s", err)
@@ -187,7 +208,7 @@ func (n *network) udpToTun(ctx context.Context) {
 }
 
 func (n *network) MTU() int {
-	return n.ExtIface.Iface.MTU - encapOverhead
+	return n.ExtIface.Iface.MTU - encapHeaderLen - n.localPolicy.TagLength()
 }
 
 func (n *network) initTun() error {
