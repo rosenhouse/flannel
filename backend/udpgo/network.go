@@ -33,7 +33,9 @@ import (
 )
 
 const (
-	encapOverhead = 28 // 20 bytes IP hdr + 8 bytes UDP hdr
+	tagLen        = 16
+	encapLen      = 20 + 8 // 20 bytes IP hdr + 8 bytes UDP hdr
+	encapOverhead = encapLen + tagLen
 )
 
 type network struct {
@@ -126,13 +128,14 @@ func (n *network) Run(ctx context.Context) {
 }
 
 func (n *network) tunToUDP(ctx context.Context) {
-	tunBuffer := make([]byte, n.MTU())
+	tunBuffer := make([]byte, tagLen+n.MTU())
+	copy(tunBuffer[:tagLen], []byte("0123456789ABCDEF"))
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		default:
-			nBytesRead, err := n.tunIO.Read(tunBuffer)
+			nBytesRead, err := n.tunIO.Read(tunBuffer[tagLen:])
 			if err != nil {
 				log.Errorf("tun read: %s", err)
 				continue
@@ -141,8 +144,8 @@ func (n *network) tunToUDP(ctx context.Context) {
 				log.Info("tun empty read")
 				continue
 			}
-			toSend := tunBuffer[:nBytesRead]
-			dest, err := n.findDest(toSend)
+			toSend := tunBuffer[:(tagLen + nBytesRead)]
+			dest, err := n.findDest(toSend[tagLen:])
 			if err != nil {
 				log.Errorf("find dest: %s", err)
 				continue
@@ -156,7 +159,7 @@ func (n *network) tunToUDP(ctx context.Context) {
 }
 
 func (n *network) udpToTun(ctx context.Context) {
-	udpPayload := make([]byte, n.MTU())
+	udpPayload := make([]byte, tagLen+n.MTU())
 	for {
 		select {
 		case <-ctx.Done():
@@ -171,8 +174,11 @@ func (n *network) udpToTun(ctx context.Context) {
 				log.Info("udp empty read")
 				continue
 			}
+			if udpPayload[15] != byte('F') {
+				log.Errorf("bad tag: %x : %s", udpPayload[:tagLen], string(udpPayload[:tagLen]))
+			}
 			// TODO: apply ingress policy here
-			if _, err := n.tunIO.Write(udpPayload); err != nil {
+			if _, err := n.tunIO.Write(udpPayload[tagLen:]); err != nil {
 				log.Errorf("write to tun: %s", err)
 				continue
 			}
