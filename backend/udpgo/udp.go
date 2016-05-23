@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	log "github.com/coreos/flannel/Godeps/_workspace/src/github.com/golang/glog"
 	"github.com/coreos/flannel/Godeps/_workspace/src/golang.org/x/net/context"
 
 	"github.com/coreos/flannel/backend"
@@ -50,9 +51,13 @@ func New(subnetManager subnet.Manager, extIface *backend.ExternalInterface) (bac
 
 func (be *UdpgoBackend) RegisterNetwork(ctx context.Context, netname string, config *subnet.Config) (backend.Network, error) {
 	cfg := struct {
-		Port int
+		Port            int
+		PolicyURL       string
+		LocalListenAddr string
 	}{
-		Port: defaultPort,
+		Port:            defaultPort,
+		PolicyURL:       "",
+		LocalListenAddr: "127.0.0.1:9022",
 	}
 
 	// Parse our configuration
@@ -61,6 +66,8 @@ func (be *UdpgoBackend) RegisterNetwork(ctx context.Context, netname string, con
 			return nil, fmt.Errorf("error decoding UDP backend config: %v", err)
 		}
 	}
+
+	log.Infof("udpgo backend: parsed config %#v", cfg)
 
 	// Acquire the lease form subnet manager
 	attrs := subnet.LeaseAttrs{
