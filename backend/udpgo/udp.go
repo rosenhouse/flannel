@@ -17,9 +17,11 @@ package udpgo
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 
 	log "github.com/coreos/flannel/Godeps/_workspace/src/github.com/golang/glog"
 	"github.com/coreos/flannel/Godeps/_workspace/src/golang.org/x/net/context"
+	"github.com/pivotal-golang/lager"
 
 	"github.com/coreos/flannel/backend"
 	"github.com/coreos/flannel/pkg/fdb"
@@ -94,6 +96,19 @@ func (be *UdpgoBackend) RegisterNetwork(ctx context.Context, netname string, con
 
 	forwardingDB := fdb.NewUDPForwardingDB()
 	localPolicy := policy.NewFixedPolicy([]byte("0123456789ABCDEF"))
+
+	logger := lager.NewLogger("policy-controller")
+	logger.RegisterSink(lager.NewWriterSink(os.Stdout, lager.INFO))
+	policyControl := &PolicyControl{
+		Logger:          logger,
+		LocalListenAddr: cfg.LocalListenAddr,
+	}
+	go func() {
+		err := policyControl.Run()
+		if err != nil {
+			logger.Fatal("policy-controller", err)
+		}
+	}()
 
 	return newNetwork(netname, be.subnetManager, be.extIface, cfg.Port, tunNet,
 		lease, forwardingDB, localPolicy)
