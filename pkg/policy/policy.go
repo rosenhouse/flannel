@@ -1,9 +1,8 @@
 package policy
 
 import (
-	"bytes"
-	"fmt"
 	"net"
+	"policy-server/models"
 )
 
 type LocalPolicy interface {
@@ -12,27 +11,24 @@ type LocalPolicy interface {
 	IsAllowed(remoteSourceTag []byte, localDest net.IP) (bool, error)
 }
 
-type fixedPolicy struct {
-	tag []byte
+type LocalDB interface {
+	GetGroups() ([]string, error)
+	SetWhitelists([]models.IngressWhitelist) error
 }
 
-func NewFixedPolicy(tag []byte) LocalPolicy {
-	return &fixedPolicy{
-		tag: tag,
-	}
+type Endpoint struct {
+	ContainerID string
+	GroupID     string
+	OverlayIP   net.IP
 }
 
-func (p *fixedPolicy) TagLength() int {
-	return len(p.tag)
+type EndpointCollection interface {
+	Register(Endpoint) error
+	Deregister(Endpoint) error
 }
 
-func (p *fixedPolicy) GetSourceTag(localSource net.IP) ([]byte, error) {
-	return p.tag, nil
-}
-
-func (p *fixedPolicy) IsAllowed(remoteSourceTag []byte, localDest net.IP) (bool, error) {
-	if len(remoteSourceTag) != len(p.tag) {
-		return false, fmt.Errorf("bad tag length: got %d, expected %d", len(remoteSourceTag), len(p.tag))
-	}
-	return bytes.Equal(remoteSourceTag, p.tag), nil
+type DynamicPolicy interface {
+	LocalPolicy
+	LocalDB
+	EndpointCollection
 }

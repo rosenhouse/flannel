@@ -1,4 +1,5 @@
-// Copyright 2015 flannel authors
+// +build linux
+// // Copyright 2015 flannel authors
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.

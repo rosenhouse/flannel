@@ -17,7 +17,10 @@ package udpgo
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"os"
+	"policy-server/client"
+	"time"
 
 	log "github.com/coreos/flannel/Godeps/_workspace/src/github.com/golang/glog"
 	"github.com/coreos/flannel/Godeps/_workspace/src/golang.org/x/net/context"
@@ -95,18 +98,40 @@ func (be *UdpgoBackend) RegisterNetwork(ctx context.Context, netname string, con
 	}
 
 	forwardingDB := fdb.NewUDPForwardingDB()
-	localPolicy := policy.NewFixedPolicy([]byte("0123456789ABCDEF"))
+	const tagLength = 4
 
-	logger := lager.NewLogger("policy-controller")
+	logger := lager.NewLogger("udpgo")
 	logger.RegisterSink(lager.NewWriterSink(os.Stdout, lager.INFO))
-	policyControl := &PolicyControl{
-		Logger:          logger,
+
+	controlTag := []byte("ctrl")
+	localPolicy := policy.NewDynamicPolicy(logger.Session("policy"), tagLength, tunNet.IP.ToIP(), controlTag)
+
+	policyHandler := &policy.Handler{
+		Logger:          logger.Session("policy-handler"),
 		LocalListenAddr: cfg.LocalListenAddr,
+		Registrar:       localPolicy,
+	}
+
+	var timeoutClient = &http.Client{
+		Timeout: time.Second * 10,
+	}
+
+	policyPoller := &policy.Poller{
+		Logger:             logger.Session("policy-poller"),
+		PollInterval:       5 * time.Second,
+		LocalDB:            localPolicy,
+		PolicyServerClient: client.NewInnerClient(cfg.PolicyURL, timeoutClient),
 	}
 	go func() {
-		err := policyControl.Run()
+		err := policyHandler.RunServer()
 		if err != nil {
-			logger.Fatal("policy-controller", err)
+			logger.Fatal("policy-controller-server", err)
+		}
+	}()
+	go func() {
+		err := policyPoller.RunPoller()
+		if err != nil {
+			logger.Fatal("policy-controller-poller", err)
 		}
 	}()
 

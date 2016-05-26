@@ -150,7 +150,7 @@ func (n *network) tunToUDP(ctx context.Context) {
 			toSend := tunBuffer[:(tagLen + nBytesRead)] // trim outgoing packet
 
 			// apply correct tag
-			localSourceIP := waterutil.IPv4Source(toSend)
+			localSourceIP := waterutil.IPv4Source(toSend[tagLen:])
 			sourceTag, err := n.localPolicy.GetSourceTag(localSourceIP)
 			if err != nil {
 				log.Errorf("get source tag: %s", err)
